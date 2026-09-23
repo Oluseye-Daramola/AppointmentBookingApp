@@ -8,6 +8,22 @@ const availabilitySchema = new mongoose.Schema(
       required: true,
     },
 
+    dayOfWeek: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+      enum: [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+      ],
+    },
+
     startTime: {
       type: Date,
       required: true,
