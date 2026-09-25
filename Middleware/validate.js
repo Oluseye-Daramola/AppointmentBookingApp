@@ -1,13 +1,21 @@
+const mongoose = require("mongoose");
+
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidObjectId(value) {
+  return mongoose.Types.ObjectId.isValid(value);
+}
 
 /**
  * Validates the body of a "create appointment" request.
  *
- * Matches the Appointment schema exactly:
+ * Expected body:
  * {
- *   provider,       // required, ObjectId string
- *   service,        // required, ObjectId string
- *   customerName,   // required, string
+ *   provider,       // required, valid ObjectId
+ *   service,        // required, valid ObjectId
+ *   customerName,   // required, string, max 100 chars
  *   customerEmail,  // required, valid email
  *   customerPhone,  // optional
  *   startTime,      // required, valid date
@@ -21,37 +29,66 @@ function validateAppointmentInput(req, res, next) {
     service,
     customerName,
     customerEmail,
+    customerPhone,
     startTime,
     endTime,
     notes,
   } = req.body;
+
   const errors = [];
 
-  if (!provider) errors.push('provider is required');
-  if (!service) errors.push('service is required');
+  // Provider
+  if (!provider) {
+    errors.push("provider is required");
+  } else if (!isValidObjectId(provider)) {
+    errors.push("provider must be a valid ObjectId");
+  }
 
-  if (!customerName || !customerName.trim()) {
-    errors.push('customerName is required');
+  // Service
+  if (!service) {
+    errors.push("service is required");
+  } else if (!isValidObjectId(service)) {
+    errors.push("service must be a valid ObjectId");
+  }
+
+  // Customer name
+  if (!customerName || typeof customerName !== "string" || !customerName.trim()) {
+    errors.push("customerName is required");
   } else if (customerName.trim().length > 100) {
-    errors.push('customerName must be 100 characters or fewer');
+    errors.push("customerName must be 100 characters or fewer");
   }
 
-  if (!customerEmail) {
-    errors.push('customerEmail is required');
-  } else if (!EMAIL_PATTERN.test(customerEmail)) {
-    errors.push('customerEmail must be a valid email');
+  // Customer email
+  if (!customerEmail || typeof customerEmail !== "string") {
+    errors.push("customerEmail is required");
+  } else if (!EMAIL_PATTERN.test(customerEmail.trim())) {
+    errors.push("customerEmail must be a valid email");
   }
 
-  if (!startTime) errors.push('startTime is required');
-  if (!endTime) errors.push('endTime is required');
-
-  if (startTime && Number.isNaN(Date.parse(startTime))) {
-    errors.push('startTime must be a valid date');
+  // Customer phone
+  if (
+    customerPhone !== undefined &&
+    customerPhone !== null &&
+    typeof customerPhone !== "string"
+  ) {
+    errors.push("customerPhone must be a string");
   }
-  if (endTime && Number.isNaN(Date.parse(endTime))) {
-    errors.push('endTime must be a valid date');
+
+  // Start time
+  if (!startTime) {
+    errors.push("startTime is required");
+  } else if (Number.isNaN(Date.parse(startTime))) {
+    errors.push("startTime must be a valid date");
   }
 
+  // End time
+  if (!endTime) {
+    errors.push("endTime is required");
+  } else if (Number.isNaN(Date.parse(endTime))) {
+    errors.push("endTime must be a valid date");
+  }
+
+  // Compare appointment times
   if (
     startTime &&
     endTime &&
@@ -62,19 +99,28 @@ function validateAppointmentInput(req, res, next) {
     const end = new Date(endTime);
 
     if (start >= end) {
-      errors.push('startTime must be before endTime');
+      errors.push("startTime must be before endTime");
     }
+
     if (start < new Date()) {
-      errors.push('startTime cannot be in the past');
+      errors.push("startTime cannot be in the past");
     }
   }
 
-  if (notes && notes.length > 1000) {
-    errors.push('notes must be 1000 characters or fewer');
+  // Notes
+  if (notes !== undefined && notes !== null) {
+    if (typeof notes !== "string") {
+      errors.push("notes must be a string");
+    } else if (notes.length > 1000) {
+      errors.push("notes must be 1000 characters or fewer");
+    }
   }
 
   if (errors.length > 0) {
-    return res.status(400).json({ success: false, errors });
+    return res.status(400).json({
+      success: false,
+      errors,
+    });
   }
 
   next();
@@ -83,30 +129,45 @@ function validateAppointmentInput(req, res, next) {
 /**
  * Validates query parameters for an availability check.
  *
- * Expected query: ?providerId=...&serviceId=...&date=YYYY-MM-DD
- * serviceId is required because availabilityService.getAvailableSlots()
- * sizes each slot to the service's durationMinutes.
+ * Expected query:
+ * ?providerId=...&serviceId=...&date=YYYY-MM-DD
  */
 function validateAvailabilityQuery(req, res, next) {
   const { providerId, serviceId, date } = req.query;
   const errors = [];
 
-  if (!providerId) errors.push('providerId query param is required');
-  if (!serviceId) errors.push('serviceId query param is required');
+  // Provider ID
+  if (!providerId) {
+    errors.push("providerId query param is required");
+  } else if (!isValidObjectId(providerId)) {
+    errors.push("providerId query param must be a valid ObjectId");
+  }
 
+  // Service ID
+  if (!serviceId) {
+    errors.push("serviceId query param is required");
+  } else if (!isValidObjectId(serviceId)) {
+    errors.push("serviceId query param must be a valid ObjectId");
+  }
+
+  // Date
   if (!date) {
-    errors.push('date query param is required');
+    errors.push("date query param is required");
+  } else if (!DATE_ONLY_PATTERN.test(date)) {
+    errors.push("date query param must use YYYY-MM-DD format");
   } else {
-    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-    if (!datePattern.test(date)) {
-      errors.push('date query param must use YYYY-MM-DD format');
-    } else if (Number.isNaN(Date.parse(`${date}T00:00:00`))) {
-      errors.push('date query param must be a valid date');
+    const parsedDate = new Date(`${date}T00:00:00`);
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      errors.push("date query param must be a valid date");
     }
   }
 
   if (errors.length > 0) {
-    return res.status(400).json({ success: false, errors });
+    return res.status(400).json({
+      success: false,
+      errors,
+    });
   }
 
   next();
@@ -114,37 +175,91 @@ function validateAvailabilityQuery(req, res, next) {
 
 /**
  * Validates the body of a provider registration request.
- * Matches the Provider schema's required fields.
+ *
+ * Matches the Provider schema:
+ * {
+ *   name,          // required, max 100
+ *   businessName,  // required, max 100
+ *   slug,          // required, max 100, valid slug format
+ *   email,         // required, valid email
+ *   password       // required, min 8, max 72 bytes
+ * }
  */
 function validateProviderRegistration(req, res, next) {
-  const { name, businessName, slug, email, password } = req.body;
+  const {
+    name,
+    businessName,
+    slug,
+    email,
+    password,
+    bio,
+  } = req.body;
+
   const errors = [];
 
-  if (!name || !name.trim()) errors.push('name is required');
-  if (!businessName || !businessName.trim()) errors.push('businessName is required');
-
-  if (!slug) {
-    errors.push('slug is required');
-  } else if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug.toLowerCase())) {
-    errors.push('slug must use lowercase letters, numbers, and hyphens only');
+  // Name
+  if (!name || typeof name !== "string" || !name.trim()) {
+    errors.push("name is required");
+  } else if (name.trim().length > 100) {
+    errors.push("name must be 100 characters or fewer");
   }
 
-  if (!email) {
-    errors.push('email is required');
-  } else if (!EMAIL_PATTERN.test(email)) {
-    errors.push('email must be a valid email');
+  // Business name
+  if (
+    !businessName ||
+    typeof businessName !== "string" ||
+    !businessName.trim()
+  ) {
+    errors.push("businessName is required");
+  } else if (businessName.trim().length > 100) {
+    errors.push("businessName must be 100 characters or fewer");
   }
 
-  if (!password) {
-    errors.push('password is required');
-  } else if (password.length < 8) {
-    errors.push('password must be at least 8 characters');
-  } else if (Buffer.byteLength(password, 'utf8') > 72) {
-    errors.push('password must not exceed 72 bytes');
+  // Slug
+  if (!slug || typeof slug !== "string") {
+    errors.push("slug is required");
+  } else if (slug.length > 100) {
+    errors.push("slug must be 100 characters or fewer");
+  } else if (!SLUG_PATTERN.test(slug.toLowerCase())) {
+    errors.push(
+      "slug must use lowercase letters, numbers, and hyphens only"
+    );
+  }
+
+  // Email
+  if (!email || typeof email !== "string") {
+    errors.push("email is required");
+  } else if (!EMAIL_PATTERN.test(email.trim())) {
+    errors.push("email must be a valid email");
+  }
+
+  // Password
+  if (!password || typeof password !== "string") {
+    errors.push("password is required");
+  } else {
+    if (password.length < 8) {
+      errors.push("password must be at least 8 characters");
+    }
+
+    if (Buffer.byteLength(password, "utf8") > 72) {
+      errors.push("password must not exceed 72 bytes");
+    }
+  }
+
+  // Bio - optional
+  if (bio !== undefined && bio !== null) {
+    if (typeof bio !== "string") {
+      errors.push("bio must be a string");
+    } else if (bio.trim().length > 1000) {
+      errors.push("bio must be 1000 characters or fewer");
+    }
   }
 
   if (errors.length > 0) {
-    return res.status(400).json({ success: false, errors });
+    return res.status(400).json({
+      success: false,
+      errors,
+    });
   }
 
   next();
@@ -157,11 +272,21 @@ function validateProviderLogin(req, res, next) {
   const { email, password } = req.body;
   const errors = [];
 
-  if (!email) errors.push('email is required');
-  if (!password) errors.push('password is required');
+  if (!email || typeof email !== "string") {
+    errors.push("email is required");
+  } else if (!EMAIL_PATTERN.test(email.trim())) {
+    errors.push("email must be a valid email");
+  }
+
+  if (!password || typeof password !== "string") {
+    errors.push("password is required");
+  }
 
   if (errors.length > 0) {
-    return res.status(400).json({ success: false, errors });
+    return res.status(400).json({
+      success: false,
+      errors,
+    });
   }
 
   next();

@@ -51,43 +51,6 @@ function authenticate(req, res, next) {
   }
 }
 
-/**
- * Restricts access to specific user roles.
- *
- * Example:
- * authorize('admin')
- * authorize('provider', 'admin')
- *
- * Must be used after authenticate().
- */
-function authorize(...allowedRoles) {
-  return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        error: 'Not authenticated',
-      });
-    }
-
-    if (!req.user.role) {
-      return res.status(403).json({
-        success: false,
-        error: 'User role not found',
-      });
-    }
-
-    if (!allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        error: 'You do not have permission to access this resource',
-      });
-    }
-
-    next();
-  };
-}
-
 module.exports = {
   authenticate,
-  authorize,
-};
+};  
